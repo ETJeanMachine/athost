@@ -1,0 +1,53 @@
+{
+  "lexicon": 1,
+  "id": "org.athost.feed.post",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Record containing an Athost post.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["content", "createdAt"],
+        "properties": {
+          "content": {
+            "type": "html",
+            "maxSizeKB": 5,
+            "description": "The primary post content. May be an empty string, if there are embeds."
+          },
+          "embed": {
+            "type": "union",
+            "refs": ["app.bsky.embed.image", "app.bsky.embed.video"]
+          },
+          "langs": {
+            "type": "array",
+            "description": "Indicates human language of post primary text content.",
+            "maxLength": 3,
+            "items": { "type": "string", "format": "language" }
+          },
+          "labels": {
+            "type": "union",
+            "description": "Self-label values for this post. Effectively content warnings.",
+            "refs": ["com.atproto.label.defs#selfLabels"]
+          },
+          "tags": {
+            "type": "array",
+            "description": "Tags associated with the post.",
+            "maxLength": 16,
+            "items": { "type": "string", "maxLength": 640, "maxGraphemes": 64 }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Client-declared timestamp when this post was originally created."
+          },
+          "archive": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Timestamp when this post was originally created if it was archived."
+          }
+        }
+      }
+    }
+  }
+}

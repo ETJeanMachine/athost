@@ -1,0 +1,32 @@
+{
+  "lexicon": 1,
+  "id": "org.athost.feed.comment",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A comment on a post.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["content", "createdAt"],
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 3000,
+            "maxGraphemes": 300,
+            "desc": "A comment on a post."
+          },
+          "facets": {
+            "type": "array",
+            "description": "Annotations of text (mentions, URLs, hashtags, etc)",
+            "items": { "type": "ref", "ref": "app.bsky.richtext.facet" }
+          },
+          "createdAt": {
+            "type": "string",
+            "desc": "The timestamp when the comment was created."
+          }
+        }
+      }
+    }
+  }
+}
