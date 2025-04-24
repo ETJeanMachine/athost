@@ -1,10 +1,10 @@
 [package]
 name = "athost"
 version = "0.0.1"
-authors = ["Eric Hamilton <etj2206@rit.edu>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
+athost_identity = { path = "../athost_identity" }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
 futures-util = "0.3"
