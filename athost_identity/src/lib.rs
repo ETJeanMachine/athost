@@ -159,18 +159,13 @@ impl DID {
         Ok(document)
     }
 
-    pub async fn resolve_handle(&self) -> Result<(), String> {
-        match self.method {
-            DIDMethod::Web => {
-                let response =
-                    reqwest::get(format!("https://{}/.well-known/did.json", self.identifier)).await;
-                match response {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err("Failed to resolve DID".to_string()),
-                }
-            }
-            DIDMethod::PLC => todo!(),
+    pub async fn resolve_handle(&self) -> Result<String, String> {
+        let did_document = self.fetch_document().await?;
+        if did_document.also_known_as.is_empty() {
+            return Err("DID document does not contain a handle".to_string());
         }
+        let handle = did_document.also_known_as[0].to_string();
+        Ok(handle)
     }
 
     /// Converts the DID to a URI format prefixed with "at://".
