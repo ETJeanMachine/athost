@@ -1,7 +1,11 @@
+use std::{fmt::format, str::FromStr};
+
 use regex::Regex;
+use reqwest::get;
+use serde::{Deserialize, Serialize};
 
 /// DIDMethod represents the method used to represent a DID.
-pub enum DIDMethod {
+enum DIDMethod {
     Web,
     PLC,
 }
@@ -12,29 +16,6 @@ impl DIDMethod {
             "web" => Ok(DIDMethod::Web),
             "plc" => Ok(DIDMethod::PLC),
             _ => Err("Unsupported DID method".to_string()),
-        }
-    }
-
-    fn validate_identifier(&self, identifier: &str) -> Result<(), String> {
-        match self {
-            DIDMethod::Web => {
-                // Validate format: domain.tld or subdomain.domain.tld (without protocol or trailing slashes)
-                let re = Regex::new(r"^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$").unwrap();
-                if re.is_match(identifier) {
-                    Ok(())
-                } else {
-                    Err("Invalid Web DID identifier: must be a valid domain".to_string())
-                }
-            }
-            DIDMethod::PLC => {
-                // PLC DID's are just lowercase alphanumeric strings
-                let re = Regex::new(r"^[a-z0-9]+$").unwrap();
-                if re.is_match(identifier) {
-                    Ok(())
-                } else {
-                    Err("Invalid PLC DID identifier".to_string())
-                }
-            }
         }
     }
 
@@ -58,6 +39,59 @@ impl DIDMethod {
             DIDMethod::PLC => "plc",
         }
     }
+}
+
+/// Helper method for the identity interface for validating did:web or did:plc identifiers.
+fn validate_identifier(method: &DIDMethod, identifier: &str) -> Result<(), String> {
+    match method {
+        DIDMethod::Web => {
+            // Validate format: domain.tld or subdomain.domain.tld (without protocol or trailing slashes)
+            let re = Regex::new(r"^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$").unwrap();
+            if re.is_match(identifier) {
+                Ok(())
+            } else {
+                Err("Invalid Web DID identifier: must be a valid domain".to_string())
+            }
+        }
+        DIDMethod::PLC => {
+            // PLC DID's are just lowercase alphanumeric strings
+            let re = Regex::new(r"^[a-z0-9]+$").unwrap();
+            if re.is_match(identifier) {
+                Ok(())
+            } else {
+                Err("Invalid PLC DID identifier".to_string())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DIDDocument {
+    #[serde(rename = "@context")]
+    context: Vec<String>,
+    id: String,
+    #[serde(rename = "alsoKnownAs")]
+    also_known_as: Vec<String>,
+    #[serde(rename = "verificationMethod")]
+    verification_method: Vec<DIDVerificationMethod>,
+    service: Vec<DIDService>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DIDVerificationMethod {
+    id: String,
+    r#type: String,
+    controller: String,
+    #[serde(rename = "publicKeyMultibase")]
+    public_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DIDService {
+    id: String,
+    r#type: String,
+    #[serde(rename = "serviceEndpoint")]
+    service_endpoint: String,
 }
 
 pub struct DID {
@@ -86,41 +120,43 @@ impl DID {
     /// # Examples
     ///
     /// ```
-    /// let did = DID::new(DIDMethod::Web, "example.com".to_string());
+    /// let did = DID::new("web", "example.com".to_string());
     /// ```
-    pub fn new(method: DIDMethod, identifier: String) -> Result<Self, String> {
-        match method.validate_identifier(identifier.as_str()) {
+    fn new(method: &str, identifier: String) -> Result<Self, String> {
+        let method = DIDMethod::from_str(method)?;
+        match validate_identifier(&method, identifier.as_str()) {
             Ok(_) => Ok(DID { method, identifier }),
             Err(err) => Err(err),
         }
     }
 
-    /// Parses a DID string into a DID struct, and validates the format.
-    ///
-    /// # Arguments
-    ///
-    /// `did` - A string slice representing a DID in the format "did:method:identifier"
-    ///
-    /// # Returns
-    ///
-    /// `Result<Self, String>` - A Result containing either the parsed DID or an error message.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let did = DID::from_string("did:web:example.com").unwrap();
-    /// ```
-    pub fn from_string(did: &str) -> Result<Self, String> {
+    pub fn from_str(did: &str) -> Result<Self, String> {
         let re = Regex::new(r"^did:[a-z]+:[a-zA-Z0-9._:%-]*[a-zA-Z0-9._-]$").unwrap();
         if !re.is_match(did) {
             return Err("Invalid DID Syntax.".to_string());
         }
         let parts: Vec<&str> = did.split(':').collect();
-        // will return an error here if the method isn't supported. should ideally be expandable to future methods.
-        let method = DIDMethod::from_str(parts[1])?;
-        let identifier = parts[2].to_string();
-        // will return an error if the identifier is invalid
-        DID::new(method, identifier)
+        // will return an error if the identifier and/or is invalid
+        DID::new(parts[1], parts[2].to_string())
+    }
+
+    pub async fn fetch_document(&self) -> Result<DIDDocument, String> {
+        let document_url = match self.method {
+            DIDMethod::PLC => format!("https://plc.directory/{}", self.to_string()),
+            DIDMethod::Web => format!("https://{}/.well-known/did.json", self.identifier),
+        };
+        let result = match reqwest::get(&document_url).await {
+            Ok(response) => match response.text().await {
+                Ok(text) => text,
+                Err(err) => return Err(err.to_string()),
+            },
+            Err(err) => return Err(err.to_string()),
+        };
+        let document: DIDDocument = match serde_json::from_str(&result) {
+            Ok(doc) => doc,
+            Err(err) => return Err(err.to_string()),
+        };
+        Ok(document)
     }
 
     pub async fn resolve_handle(&self) -> Result<(), String> {
