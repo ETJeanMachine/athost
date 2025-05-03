@@ -1,7 +1,4 @@
-use std::{fmt::format, str::FromStr};
-
 use regex::Regex;
-use reqwest::get;
 use serde::{Deserialize, Serialize};
 
 /// DIDMethod represents the method used to represent a DID.
@@ -42,27 +39,15 @@ impl DIDMethod {
 }
 
 /// Helper method for the identity interface for validating did:web or did:plc identifiers.
-fn validate_identifier(method: &DIDMethod, identifier: &str) -> Result<(), String> {
-    match method {
+fn validate_identifier(method: &DIDMethod, identifier: &str) -> bool {
+    let reg_str = match method {
         DIDMethod::Web => {
-            // Validate format: domain.tld or subdomain.domain.tld (without protocol or trailing slashes)
-            let re = Regex::new(r"^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$").unwrap();
-            if re.is_match(identifier) {
-                Ok(())
-            } else {
-                Err("Invalid Web DID identifier: must be a valid domain".to_string())
-            }
+            r"^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$"
         }
-        DIDMethod::PLC => {
-            // PLC DID's are just lowercase alphanumeric strings
-            let re = Regex::new(r"^[a-z0-9]+$").unwrap();
-            if re.is_match(identifier) {
-                Ok(())
-            } else {
-                Err("Invalid PLC DID identifier".to_string())
-            }
-        }
-    }
+        DIDMethod::PLC => r"^[a-z0-9]+$",
+    };
+    let re = Regex::new(reg_str).unwrap();
+    re.is_match(identifier)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,9 +109,10 @@ impl DID {
     /// ```
     fn new(method: &str, identifier: String) -> Result<Self, String> {
         let method = DIDMethod::from_str(method)?;
-        match validate_identifier(&method, identifier.as_str()) {
-            Ok(_) => Ok(DID { method, identifier }),
-            Err(err) => Err(err),
+        if validate_identifier(&method, identifier.as_str()) {
+            Ok(DID { method, identifier })
+        } else {
+            Err("Invalid identifier".to_string())
         }
     }
 
@@ -152,11 +138,10 @@ impl DID {
             },
             Err(err) => return Err(err.to_string()),
         };
-        let document: DIDDocument = match serde_json::from_str(&result) {
-            Ok(doc) => doc,
-            Err(err) => return Err(err.to_string()),
-        };
-        Ok(document)
+        match serde_json::from_str(&result) {
+            Ok(doc) => Ok(doc),
+            Err(err) => Err(err.to_string()),
+        }
     }
 
     pub async fn resolve_handle(&self) -> Result<String, String> {
