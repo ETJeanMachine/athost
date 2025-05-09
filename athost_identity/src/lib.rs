@@ -1,5 +1,9 @@
+use std::error::Error as StdError;
+
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+
+type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 
 /// DIDMethod represents the method used to represent a DID.
 enum DIDMethod {
@@ -36,18 +40,6 @@ impl DIDMethod {
             DIDMethod::PLC => "plc",
         }
     }
-}
-
-/// Helper method for the identity interface for validating did:web or did:plc identifiers.
-fn validate_identifier(method: &DIDMethod, identifier: &str) -> bool {
-    let reg_str = match method {
-        DIDMethod::Web => {
-            r"^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$"
-        }
-        DIDMethod::PLC => r"^[a-z0-9]+$",
-    };
-    let re = Regex::new(reg_str).unwrap();
-    re.is_match(identifier)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,11 +101,23 @@ impl DID {
     /// ```
     fn new(method: &str, identifier: String) -> Result<Self, String> {
         let method = DIDMethod::from_str(method)?;
-        if validate_identifier(&method, identifier.as_str()) {
+        if DID::validate_identifier(&method, identifier.as_str()) {
             Ok(DID { method, identifier })
         } else {
             Err("Invalid identifier".to_string())
         }
+    }
+
+    /// Helper method for the identity interface for validating did:web or did:plc identifiers.
+    fn validate_identifier(method: &DIDMethod, identifier: &str) -> bool {
+        let reg_str = match method {
+            DIDMethod::Web => {
+                r"^([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$"
+            }
+            DIDMethod::PLC => r"^[a-z0-9]+$",
+        };
+        let re = Regex::new(reg_str).unwrap();
+        re.is_match(identifier)
     }
 
     pub fn from_str(did: &str) -> Result<Self, String> {
@@ -126,31 +130,24 @@ impl DID {
         DID::new(parts[1], parts[2].to_string())
     }
 
-    pub async fn fetch_document(&self) -> Result<DIDDocument, String> {
+    pub async fn fetch_document(&self) -> Result<DIDDocument, BoxDynError> {
         let document_url = match self.method {
             DIDMethod::PLC => format!("https://plc.directory/{}", self.to_string()),
             DIDMethod::Web => format!("https://{}/.well-known/did.json", self.identifier),
         };
-        let result = match reqwest::get(&document_url).await {
-            Ok(response) => match response.text().await {
-                Ok(text) => text,
-                Err(err) => return Err(err.to_string()),
-            },
-            Err(err) => return Err(err.to_string()),
-        };
-        match serde_json::from_str(&result) {
-            Ok(doc) => Ok(doc),
-            Err(err) => Err(err.to_string()),
-        }
+        let result = reqwest::get(&document_url).await?.text().await?;
+        let doc = serde_json::from_str(&result)?;
+
+        Ok(doc)
     }
 
-    pub async fn resolve_handle(&self) -> Result<String, String> {
+    pub async fn resolve_handle(&self) -> Result<String, BoxDynError> {
         let did_document = self.fetch_document().await?;
-        if did_document.also_known_as.is_empty() {
-            return Err("DID document does not contain a handle".to_string());
-        }
-        let handle = did_document.also_known_as[0].to_string();
-        Ok(handle)
+        let handle = did_document
+            .also_known_as
+            .get(0)
+            .ok_or("DID Document is missing a handle.")?;
+        Ok(handle.to_string())
     }
 
     /// Converts the DID to a URI format prefixed with "at://".
